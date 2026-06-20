@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+#
+# adbqr pairs a laptop to an Android phone over wireless debugging with a QR
+# code, so you skip Android Studio and reading an IP and code off the phone.
+#
+# It shows a QR for Android's "Pair device with QR code" (Developer options >
+# Wireless debugging), then finds the phone over mDNS and pairs.
+#
+# The QR uses Android's adb-pairing format:
+#   WIFI:T:ADB;S:<service-name>;P:<pairing-code>;;
+# The WIFI: prefix is misleading. S is an mDNS service name rather than an
+# SSID, and P is the pairing code rather than a password. It never reads your
+# SSID or asks for Location permission.
+
+set -euo pipefail
+
+TIMEOUT=60
+
+die() { echo "Error: $*" >&2; exit 1; }
+require() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found. $2"; }
+
+require adb "Install Android platform-tools (e.g. 'brew install --cask android-platform-tools')."
+require qrencode "Install it (e.g. 'brew install qrencode')."
+
+NAME="adbqr-$(printf '%04x%04x' "$RANDOM" "$RANDOM")"
+CODE=$(( (RANDOM * 32768 + RANDOM) % 900000 + 100000 ))
+PAYLOAD="WIFI:T:ADB;S:$NAME;P:$CODE;;"
+
+echo "On the phone: Developer options > Wireless debugging > Pair device with QR code"
+echo "Service: $NAME"
+echo "Code:    $CODE"
+echo ""
+
+# Unicode block characters scan reliably; ANSIUTF8 forces black-on-white so the
+# QR keeps correct polarity regardless of the terminal's color theme.
+qrencode -m 2 -t ANSIUTF8 "$PAYLOAD"
+
+echo ""
+echo "Waiting up to ${TIMEOUT}s for the phone over mDNS (Ctrl-C to abort)..."
+
+ADDR=""
+for _ in $(seq 1 "$TIMEOUT"); do
+    ADDR=$(adb mdns services 2>/dev/null \
+        | awk '/_adb-tls-pairing\._tcp/ {print $3; exit}')
+    [ -n "$ADDR" ] && break
+    sleep 1
+done
+
+[ -n "$ADDR" ] || die "No pairing service appeared within ${TIMEOUT}s. Make sure the phone scanned the QR and is on the same network."
+
+echo "Pairing with $ADDR ..."
+exec adb pair "$ADDR" "$CODE"
