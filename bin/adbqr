@@ -19,6 +19,75 @@ TIMEOUT=60
 die() { echo "Error: $*" >&2; exit 1; }
 require() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found. $2"; }
 
+# Render the QR as an inline image using iTerm2's image protocol.
+render_inline_iterm2() {
+    local b64
+    b64=$(qrencode -m 2 -s 8 -o - -t PNG "$PAYLOAD" | base64 | tr -d '\n') || return 1
+    printf '\033]1337;File=inline=1;preserveAspectRatio=1:%s\a\n' "$b64"
+}
+
+# Render the QR as an inline image using the Kitty graphics protocol (Ghostty
+# speaks this). The base64 payload is sent in <=4096-byte chunks.
+render_inline_kitty() {
+    local b64 pos len chunk m first
+    b64=$(qrencode -m 2 -s 8 -o - -t PNG "$PAYLOAD" | base64 | tr -d '\n') || return 1
+    pos=0; len=${#b64}; first=1
+    while [ "$pos" -lt "$len" ]; do
+        chunk=${b64:pos:4096}
+        pos=$((pos + 4096))
+        m=1; if [ "$pos" -ge "$len" ]; then m=0; fi
+        if [ "$first" -eq 1 ]; then
+            printf '\033_Gf=100,a=T,m=%d;%s\033\\' "$m" "$chunk"
+            first=0
+        else
+            printf '\033_Gm=%d;%s\033\\' "$m" "$chunk"
+        fi
+    done
+    printf '\n'
+}
+
+# Ask the terminal a capability question. Writes $1 to the tty, then a DA1
+# request (CSI c) which every terminal answers. That guarantees the read
+# terminates quickly even when the queried capability is unsupported. Echoes
+# the raw response. Requires an interactive tty.
+term_query() {
+    [ -t 1 ] && [ -r /dev/tty ] || return 1
+    local old resp
+    old=$(stty -g </dev/tty 2>/dev/null) || return 1
+    stty -echo -icanon </dev/tty 2>/dev/null || { stty "$old" </dev/tty 2>/dev/null; return 1; }
+    printf '%s\033[c' "$1" >/dev/tty
+    IFS= read -rs -t 1 -d c resp </dev/tty || true
+    stty "$old" </dev/tty 2>/dev/null
+    printf '%s' "$resp"
+}
+
+# True if the terminal supports the Kitty graphics protocol (Ghostty, kitty,
+# WezTerm, Konsole, ...). Sends a 1x1 query image; a supporting terminal
+# replies with "_Gi=31;OK" before the DA1 response.
+supports_kitty_graphics() {
+    local r
+    r=$(term_query $'\033_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\033\\') || return 1
+    [[ "$r" == *"_Gi=31;OK"* ]]
+}
+
+# True if the terminal supports the iTerm2 inline-image protocol. iTerm2 and
+# WezTerm identify themselves in their XTVERSION (CSI > q) reply.
+supports_iterm2_image() {
+    local r
+    r=$(term_query $'\033[>q') || return 1
+    [[ "$r" == *"iTerm2"* || "$r" == *"WezTerm"* ]]
+}
+
+# Pick the best rendering by querying the terminal's actual capabilities,
+# falling back to a Unicode block QR (ANSIUTF8 forces black-on-white so
+# polarity survives any theme). Terminals without an image protocol (e.g.
+# macOS Terminal) and non-tty output use the block fallback.
+render_qr() {
+    if supports_kitty_graphics && render_inline_kitty; then return; fi
+    if supports_iterm2_image && render_inline_iterm2; then return; fi
+    qrencode -m 2 -t ANSIUTF8 "$PAYLOAD"
+}
+
 require adb "Install Android platform-tools (e.g. 'brew install --cask android-platform-tools')."
 require qrencode "Install it (e.g. 'brew install qrencode')."
 
@@ -31,9 +100,7 @@ echo "Service: $NAME"
 echo "Code:    $CODE"
 echo ""
 
-# Unicode block characters scan reliably; ANSIUTF8 forces black-on-white so the
-# QR keeps correct polarity regardless of the terminal's color theme.
-qrencode -m 2 -t ANSIUTF8 "$PAYLOAD"
+render_qr
 
 echo ""
 echo "Waiting up to ${TIMEOUT}s for the phone over mDNS (Ctrl-C to abort)..."
