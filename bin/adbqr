@@ -17,6 +17,18 @@ TIMEOUT=60
 die() { echo "Error: $*" >&2; exit 1; }
 require() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found. $2"; }
 
+usage() {
+    cat <<'EOF'
+Usage: adbqr [--timeout SECONDS]
+
+Show a QR code for Android "Pair device with QR code" (Developer options >
+Wireless debugging), then detect the phone over mDNS and pair automatically.
+
+  --timeout SECONDS   How long to wait for the phone (default 60).
+  -h, --help          Show this help.
+EOF
+}
+
 # Render the QR as an inline image using iTerm2's image protocol.
 render_inline_iterm2() {
     local b64
@@ -88,6 +100,15 @@ render_qr() {
 
 main() {
     set -euo pipefail
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --timeout) shift; TIMEOUT="${1:-}" ;;
+            -h|--help) usage; return 0 ;;
+            *) usage >&2; return 2 ;;
+        esac
+        shift
+    done
 
     require adb "Install Android platform-tools (e.g. 'brew install --cask android-platform-tools')."
     require qrencode "Install it (e.g. 'brew install qrencode')."
