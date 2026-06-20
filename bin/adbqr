@@ -29,6 +29,40 @@ Wireless debugging), then detect the phone over mDNS and pair automatically.
 EOF
 }
 
+# Best-effort IPv4 prefix length of the default-route interface. Echoes a
+# number (e.g. 19) or nothing if it can't be determined.
+wifi_prefixlen() {
+    local iface mask n p
+    if [ "$(uname)" = "Darwin" ]; then
+        iface=$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')
+        [ -n "$iface" ] || return 0
+        mask=$(ifconfig "$iface" 2>/dev/null | awk '/inet /{print $4; exit}')
+        case "$mask" in 0x*) ;; *) return 0 ;; esac
+        n=$((16#${mask#0x})); p=0
+        while [ "$n" -gt 0 ]; do p=$((p + (n & 1))); n=$((n >> 1)); done
+        echo "$p"
+    else
+        iface=$(ip route show default 2>/dev/null | awk '/default/{print $5; exit}')
+        [ -n "$iface" ] || return 0
+        ip -o -f inet addr show dev "$iface" 2>/dev/null \
+            | awk '{print $4}' | awk -F/ 'NF>1 {print $2; exit}'
+    fi
+}
+
+# Warn up front when the network looks like a large shared pool (guest/public
+# Wi-Fi), which commonly blocks the mDNS discovery QR pairing depends on.
+network_warning() {
+    local plen
+    plen=$(wifi_prefixlen)
+    [ -n "$plen" ] || return 0
+    if [ "$plen" -le 22 ]; then
+        echo "Heads up: this looks like a large shared network (/$plen). Public and"
+        echo "guest Wi-Fi often block the mDNS that QR pairing relies on; if the"
+        echo "phone just spins, that's the likely cause."
+        echo ""
+    fi
+}
+
 # Render the QR as an inline image using iTerm2's image protocol.
 render_inline_iterm2() {
     local b64
@@ -125,13 +159,23 @@ main() {
     render_qr
 
     echo ""
+    network_warning
     echo "Waiting up to ${TIMEOUT}s for the phone over mDNS (Ctrl-C to abort)..."
 
-    local ADDR=""
-    for _ in $(seq 1 "$TIMEOUT"); do
+    local ADDR="" nudged=0 i
+    for i in $(seq 1 "$TIMEOUT"); do
         ADDR=$(adb mdns services 2>/dev/null \
             | awk '/_adb-tls-pairing\._tcp/ {print $3; exit}')
         [ -n "$ADDR" ] && break
+        if [ "$nudged" -eq 0 ] && [ "$i" -ge 15 ]; then
+            nudged=1
+            echo ""
+            echo "Still waiting. If you've already scanned, this network may be"
+            echo "blocking mDNS device discovery (common on public/guest Wi-Fi)."
+            echo "There's no on-network fix. Pair over a phone hotspot or USB"
+            echo "(adb tcpip) instead."
+            echo ""
+        fi
         sleep 1
     done
 
