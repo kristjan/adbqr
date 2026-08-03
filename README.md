@@ -18,17 +18,27 @@ pairing for you.
 brew install kristjan/tap/adbqr
 ```
 
-You also need `adb`, which isn't bundled:
+Not a Homebrew person? `./install.sh` copies the script onto your PATH. It's a
+plain bash script and runs on macOS and Linux alike.
+
+You also need `adb` and `qrencode`, which aren't bundled:
 
 ```sh
 # macOS
 brew install --cask android-platform-tools
+brew install qrencode
+
+# Debian / Ubuntu
+sudo apt install adb qrencode
+
+# Fedora
+sudo dnf install android-tools qrencode
+
+# Arch
+sudo pacman -S android-tools qrencode
 ```
 
-On Linux, install platform-tools (or android-tools) from your package manager.
-
-Not a Homebrew person? `./install.sh` copies the script onto your PATH and leaves
-`adb` and `qrencode` up to you.
+If either is missing, adbqr tells you the right command for your system.
 
 ## Usage
 
@@ -80,7 +90,16 @@ password. It never reads your SSID and never asks for Location permission.
 make test
 ```
 
-The tests want `bats-core` and `zbar` (`brew install bats-core zbar`). They build
+The tests want `bats` and `zbarimg`:
+
+```sh
+brew install bats-core zbar          # macOS
+sudo apt install bats zbar-tools     # Debian / Ubuntu
+sudo dnf install bats zbar           # Fedora
+sudo pacman -S bats zbar             # Arch
+```
+
+They build
 a QR, decode it again with `zbarimg`, and confirm the pairing string makes it
 through, including the Kitty and iTerm2 image renderers.
 

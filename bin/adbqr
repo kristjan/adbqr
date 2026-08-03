@@ -15,7 +15,36 @@
 TIMEOUT=60
 
 die() { echo "Error: $*" >&2; exit 1; }
-require() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found. $2"; }
+require() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found. $(install_hint "$1")"; }
+
+# The platform's usual package manager, or nothing if none is recognized.
+pkg_manager() {
+    if [ "$(uname)" = "Darwin" ]; then echo brew; return; fi
+    local m
+    for m in apt dnf pacman zypper apk; do
+        if command -v "$m" >/dev/null 2>&1; then echo "$m"; return; fi
+    done
+}
+
+# How to install a missing dependency on this platform. Package names differ
+# between distributions, so each pair gets its own line.
+install_hint() {
+    local mgr
+    mgr=$(pkg_manager)
+    case "$1:$mgr" in
+        adb:brew)                            echo "Install it: brew install --cask android-platform-tools" ;;
+        adb:apt)                             echo "Install it: sudo apt install adb" ;;
+        adb:dnf|adb:zypper)                  echo "Install it: sudo $mgr install android-tools" ;;
+        adb:pacman)                          echo "Install it: sudo pacman -S android-tools" ;;
+        adb:apk)                             echo "Install it: sudo apk add android-tools" ;;
+        adb:*)                               echo "Install Android platform-tools." ;;
+        qrencode:apt|qrencode:dnf|qrencode:zypper) echo "Install it: sudo $mgr install qrencode" ;;
+        qrencode:brew)                       echo "Install it: brew install qrencode" ;;
+        qrencode:pacman)                     echo "Install it: sudo pacman -S qrencode" ;;
+        qrencode:apk)                        echo "Install it: sudo apk add libqrencode-tools" ;;
+        qrencode:*)                          echo "Install qrencode." ;;
+    esac
+}
 
 usage() {
     cat <<'EOF'
@@ -144,8 +173,8 @@ main() {
         shift
     done
 
-    require adb "Install Android platform-tools (e.g. 'brew install --cask android-platform-tools')."
-    require qrencode "Install it (e.g. 'brew install qrencode')."
+    require adb
+    require qrencode
 
     NAME="adbqr-$(printf '%04x%04x' "$RANDOM" "$RANDOM")"
     CODE=$(( (RANDOM * 32768 + RANDOM) % 900000 + 100000 ))

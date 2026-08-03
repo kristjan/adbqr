@@ -9,7 +9,9 @@
 setup() {
     source "${BATS_TEST_DIRNAME}/../bin/adbqr"
     PAYLOAD="WIFI:T:ADB;S:adbqr-test;P:424242;;"
-    TMP="$(mktemp -t adbqr-test.XXXXXX)"
+    # Spelled with an explicit directory because 'mktemp -t PREFIX' means one
+    # thing on BSD (macOS) and another, deprecated, thing on GNU (Linux).
+    TMP="$(mktemp "${TMPDIR:-/tmp}/adbqr-test.XXXXXX")"
 }
 
 teardown() {
